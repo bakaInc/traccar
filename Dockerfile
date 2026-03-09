@@ -20,6 +20,7 @@ RUN apk add --no-cache --no-progress openjdk21-jre-headless
 COPY --from=package /traccar /opt/traccar
 # COPY --from=build /home/gradle/src/build/libs/*.jar /opt/traccar/
 COPY --from=build /home/gradle/src/target/tracker-server.jar /opt/traccar/tracker-server.jar
+COPY --from=build /home/gradle/src/schema /opt/traccar/schema
 
 ENTRYPOINT ["java", "-Xms512m", "-Xmx2g", "-Djava.net.preferIPv4Stack=true"]
 CMD ["-jar", "tracker-server.jar", "conf/traccar.xml"]
