@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  traccar:
+    build: ./traccar
+    ports:
+      - "8082:8082"
+      - "9012:9012"
+      - "9014:9014"
+      - "5055:5055"
+      - "9104:9004"
+      - "5034:5034"
+      - "5022:9004"
+      - "9017:9017"
+      - "5199:5199"
+      - "5162:5162"      
+      - "5077:9007"
+      - "5013:9009"
+      - "5015:5015"      
+
+    volumes:
+      - "${PROJECT_PATH}/conf/traccar.xml:/opt/traccar/conf/traccar.xml"
+      - "${PROJECT_PATH}/:/home/gradle/src/"
