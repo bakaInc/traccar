@@ -4,7 +4,7 @@ WORKDIR /home/gradle/src
 RUN gradle assemble --no-daemon
 
 FROM alpine:3.22 AS package
-ARG TRACCAR_VERSION=6.12
+ARG TRACCAR_VERSION=6.12.2
 
 RUN apk add --no-cache ca-certificates unzip wget && update-ca-certificates && \
     wget -O /tmp/traccar.zip \
