@@ -6,9 +6,9 @@ RUN gradle assemble --no-daemon
 FROM alpine:3.22 AS package
 ARG TRACCAR_VERSION=6.12
 
-RUN apk add --no-cache unzip wget && \
-    wget -qO /tmp/traccar.zip \
-      https://github.com/traccar/traccar/releases/download/v${TRACCAR_VERSION}/traccar-other-${TRACCAR_VERSION}.zip && \
+RUN apk add --no-cache ca-certificates unzip wget && update-ca-certificates && \
+    wget -O /tmp/traccar.zip \
+      "https://github.com/traccar/traccar/releases/download/v${TRACCAR_VERSION}/traccar-other-${TRACCAR_VERSION}.zip" && \
     unzip -qo /tmp/traccar.zip -d /traccar && \
     rm -f /tmp/traccar.zip
 
