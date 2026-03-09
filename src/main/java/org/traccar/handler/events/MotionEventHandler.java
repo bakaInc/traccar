@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 - 2023 Anton Tananaev (anton@traccar.org)
+ * Copyright 2016 - 2026 Anton Tananaev (anton@traccar.org)
  * Copyright 2017 Andrey Kunitsyn (andrey@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,73 +16,118 @@
  */
 package org.traccar.handler.events;
 
-import io.netty.channel.ChannelHandler;
+import jakarta.inject.Inject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.traccar.config.Config;
 import org.traccar.config.Keys;
 import org.traccar.helper.model.AttributeUtil;
 import org.traccar.helper.model.PositionUtil;
 import org.traccar.model.Device;
-import org.traccar.model.Event;
 import org.traccar.model.Position;
 import org.traccar.reports.common.TripsConfig;
 import org.traccar.session.cache.CacheManager;
 import org.traccar.session.state.MotionProcessor;
 import org.traccar.session.state.MotionState;
+import org.traccar.session.state.NewMotionProcessor;
+import org.traccar.session.state.NewMotionState;
 import org.traccar.storage.Storage;
 import org.traccar.storage.StorageException;
 import org.traccar.storage.query.Columns;
 import org.traccar.storage.query.Condition;
 import org.traccar.storage.query.Request;
+import java.util.Date;
 
-import jakarta.inject.Inject;
-import jakarta.inject.Singleton;
-import java.util.Collections;
-import java.util.Map;
-
-@Singleton
-@ChannelHandler.Sharable
 public class MotionEventHandler extends BaseEventHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MotionEventHandler.class);
 
+    private static final String KEY_MOTION_TIME = "motionTime";
+    private static final String KEY_MOTION_LAT = "motionLat";
+    private static final String KEY_MOTION_LON = "motionLon";
+
+    private final Config config;
     private final CacheManager cacheManager;
     private final Storage storage;
 
     @Inject
-    public MotionEventHandler(CacheManager cacheManager, Storage storage) {
+    public MotionEventHandler(Config config, CacheManager cacheManager, Storage storage) {
+        this.config = config;
         this.cacheManager = cacheManager;
         this.storage = storage;
     }
 
     @Override
-    protected Map<Event, Position> analyzePosition(Position position) {
+    public void onPosition(Position position, Callback callback) {
 
         long deviceId = position.getDeviceId();
         Device device = cacheManager.getObject(Device.class, deviceId);
         if (device == null || !PositionUtil.isLatest(cacheManager, position)) {
-            return null;
-        }
-        boolean processInvalid = AttributeUtil.lookup(
-                cacheManager, Keys.EVENT_MOTION_PROCESS_INVALID_POSITIONS, deviceId);
-        if (!processInvalid && !position.getValid()) {
-            return null;
+            return;
         }
 
-        TripsConfig tripsConfig = new TripsConfig(new AttributeUtil.CacheProvider(cacheManager, deviceId));
-        MotionState state = MotionState.fromDevice(device);
-        MotionProcessor.updateState(state, position, position.getBoolean(Position.KEY_MOTION), tripsConfig);
+        var attributeProvider = new AttributeUtil.CacheProvider(cacheManager, deviceId);
+        if (config.getBoolean(Keys.REPORT_TRIP_NEW_LOGIC)) {
+            double minDistance = AttributeUtil.lookup(attributeProvider, Keys.REPORT_TRIP_MIN_DISTANCE);
+            long minDuration = AttributeUtil.lookup(attributeProvider, Keys.REPORT_TRIP_MIN_DURATION) * 1000;
+            long stopGap = AttributeUtil.lookup(attributeProvider, Keys.REPORT_TRIP_STOP_GAP) * 1000;
+            handleNewLogic(device, position, minDistance, minDuration, stopGap, callback);
+        } else {
+            TripsConfig tripsConfig = new TripsConfig(attributeProvider);
+            handleOldLogic(device, position, tripsConfig, callback);
+        }
+    }
+
+    private void handleNewLogic(
+            Device device, Position position, double minDistance, long minDuration, long stopGap, Callback callback) {
+        NewMotionState state = new NewMotionState();
+        state.setMotionStreak(device.getMotionStreak());
+        state.setPositions(cacheManager.getPositions(device.getId()));
+        if (device.hasAttribute(KEY_MOTION_TIME)) {
+            state.setEventPosition(
+                    new Date(device.getLong(KEY_MOTION_TIME)),
+                    device.getDouble(KEY_MOTION_LAT),
+                    device.getDouble(KEY_MOTION_LON));
+        } else {
+            state.setEventPosition(position);
+        }
+        NewMotionProcessor.updateState(state, position, minDistance, minDuration, stopGap);
         if (state.isChanged()) {
-            state.toDevice(device);
+            device.setMotionStreak(state.getMotionStreak());
+            device.set(KEY_MOTION_TIME, state.getEventTime().getTime());
+            device.set(KEY_MOTION_LAT, state.getEventLatitude());
+            device.set(KEY_MOTION_LON, state.getEventLongitude());
             try {
                 storage.updateObject(device, new Request(
-                        new Columns.Include("motionStreak", "motionState", "motionTime", "motionDistance"),
+                        new Columns.Include("motionStreak", "attributes"),
                         new Condition.Equals("id", device.getId())));
             } catch (StorageException e) {
                 LOGGER.warn("Update device motion error", e);
             }
         }
-        return state.getEvent() != null ? Collections.singletonMap(state.getEvent(), position) : null;
+        for (var event : state.getEvents()) {
+            callback.eventDetected(event);
+        }
+    }
+
+    private void handleOldLogic(Device device, Position position, TripsConfig tripsConfig, Callback callback) {
+        MotionState state = MotionState.fromDevice(device);
+        Position last = cacheManager.getPosition(device.getId());
+        MotionProcessor.updateState(state, last, position, position.getBoolean(Position.KEY_MOTION), tripsConfig);
+        if (state.isChanged()) {
+            state.toDevice(device);
+            try {
+                storage.updateObject(device, new Request(
+                        new Columns.Include(
+                                "motionStreak", "motionState", "motionPositionId", "motionTime", "motionDistance"),
+                        new Condition.Equals("id", device.getId())));
+            } catch (StorageException e) {
+                LOGGER.warn("Update device motion error", e);
+            }
+        }
+        if (state.getEvent() != null) {
+            callback.eventDetected(state.getEvent());
+        }
     }
 
 }

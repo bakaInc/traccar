@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Anton Tananaev (anton@traccar.org)
+ * Copyright 2020 - 2026 Anton Tananaev (anton@traccar.org)
  * Copyright 2017 Ivan Muratov (binakot@gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +20,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import org.traccar.BaseProtocolDecoder;
-import org.traccar.model.Device;
+import org.traccar.helper.BitUtil;
 import org.traccar.session.DeviceSession;
 import org.traccar.NetworkMessage;
 import org.traccar.Protocol;
@@ -28,8 +28,6 @@ import org.traccar.helper.Checksum;
 import org.traccar.model.Position;
 
 import java.net.SocketAddress;
-import java.nio.Buffer;
-import java.nio.ByteBuffer;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
@@ -46,10 +44,6 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
     private static final byte RECORD_FILE = 0x04;
     private static final byte RECORD_BINARY = 0x06;
 
-    private static final byte TAG_LATITUDE = 3;
-    private static final byte TAG_LONGITUDE = 4;
-    private static final byte TAG_COORD_PARAMS = 5;
-
     public ArnaviBinaryProtocolDecoder(Protocol protocol) {
         super(protocol);
     }
@@ -64,10 +58,11 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
             } else if (version == HEADER_VERSION_2) {
                 response.writeByte(0x04);
                 response.writeByte(0x00);
-                ByteBuffer time = ByteBuffer.allocate(4).putInt((int) (System.currentTimeMillis() / 1000));
-                ((Buffer) time).position(0);
-                response.writeByte(Checksum.modulo256(time.slice()));
+                ByteBuf time = Unpooled.buffer();
+                time.writeBytes(time);
+                response.writeByte(Checksum.modulo256(time.nioBuffer()));
                 response.writeBytes(time);
+                time.release();
             }
             response.writeByte(0x7d);
             channel.writeAndFlush(new NetworkMessage(response, channel.remoteAddress()));
@@ -86,22 +81,33 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
         while (readBytes < length) {
             short tag = buf.readUnsignedByte();
             switch (tag) {
-                case TAG_LATITUDE:
+                case 1:
+                    position.set(Position.KEY_POWER, buf.readUnsignedShortLE() / 1000.0);
+                    position.set(Position.KEY_BATTERY, buf.readUnsignedShortLE() / 1000.0);
+                    break;
+
+                case 3:
                     position.setLatitude(buf.readFloatLE());
                     position.setValid(true);
                     break;
 
-                case TAG_LONGITUDE:
+                case 4:
                     position.setLongitude(buf.readFloatLE());
                     position.setValid(true);
                     break;
 
-                case TAG_COORD_PARAMS:
+                case 5:
                     position.setCourse(buf.readUnsignedByte() * 2);
                     position.setAltitude(buf.readUnsignedByte() * 10);
                     byte satellites = buf.readByte();
                     position.set(Position.KEY_SATELLITES, satellites & 0x0F + (satellites >> 4) & 0x0F);
                     position.setSpeed(buf.readUnsignedByte());
+                    break;
+
+                case 9:
+                    long status = buf.readUnsignedIntLE();
+                    position.set(Position.KEY_POWER, BitUtil.from(status, 24) * 150 / 1000.0);
+                    position.set(Position.KEY_STATUS, status);
                     break;
 
                 default:
@@ -128,8 +134,6 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
 
             String imei = String.valueOf(buf.readLongLE());
             DeviceSession deviceSession = getDeviceSession(channel, remoteAddress, imei);
-            getCacheManager().getObject(Device.class, deviceSession.getDeviceId()).setArnaviParcelNumber(0);
-
 
             if (deviceSession != null) {
                 sendResponse(channel, version, 0);
@@ -147,16 +151,10 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
 
         int index = buf.readUnsignedByte();
 
-        getCacheManager().getObject(Device.class, deviceSession.getDeviceId()).setArnaviParcelNumber(index);
-
         byte recordType = buf.readByte();
         while (buf.readableBytes() > 0) {
             switch (recordType) {
-                case RECORD_PING:
-                case RECORD_DATA:
-                case RECORD_TEXT:
-                case RECORD_FILE:
-                case RECORD_BINARY:
+                case RECORD_PING, RECORD_DATA, RECORD_TEXT, RECORD_FILE, RECORD_BINARY -> {
                     int length = buf.readUnsignedShortLE();
                     Date time = new Date(buf.readUnsignedIntLE() * 1000);
 
@@ -167,10 +165,10 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
                     }
 
                     buf.readUnsignedByte(); // checksum
-                    break;
-
-                default:
+                }
+                default -> {
                     return null;
+                }
             }
 
             recordType = buf.readByte();

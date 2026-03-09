@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 - 2020 Anton Tananaev (anton@traccar.org)
+ * Copyright 2015 - 2024 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,15 +37,12 @@ public class WialonProtocol extends BaseProtocol {
                 Command.TYPE_REBOOT_DEVICE,
                 Command.TYPE_SEND_USSD,
                 Command.TYPE_IDENTIFICATION,
-                Command.TYPE_OUTPUT_CONTROL,
-                Command.TYPE_ENGINE_RESUME,
-                Command.TYPE_ENGINE_STOP);
+                Command.TYPE_OUTPUT_CONTROL);
         addServer(new TrackerServer(config, getName(), false) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline, Config config) {
                 pipeline.addLast(new LineBasedFrameDecoder(4 * 1024));
-                boolean utf8 = config.getBoolean(Keys.PROTOCOL_UTF8.withPrefix(getName()));
-                if (utf8) {
+                if (config.getBoolean(Keys.PROTOCOL_UTF8.withPrefix(getName()))) {
                     pipeline.addLast(new StringEncoder(StandardCharsets.UTF_8));
                     pipeline.addLast(new StringDecoder(StandardCharsets.UTF_8));
                 } else {
@@ -59,9 +56,7 @@ public class WialonProtocol extends BaseProtocol {
         addServer(new TrackerServer(config, getName(), true) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline, Config config) {
-                pipeline.addLast(new LineBasedFrameDecoder(4 * 1024));
-                boolean utf8 = config.getBoolean(Keys.PROTOCOL_UTF8.withPrefix(getName()));
-                if (utf8) {
+                if (config.getBoolean(Keys.PROTOCOL_UTF8.withPrefix(getName()))) {
                     pipeline.addLast(new StringEncoder(StandardCharsets.UTF_8));
                     pipeline.addLast(new StringDecoder(StandardCharsets.UTF_8));
                 } else {

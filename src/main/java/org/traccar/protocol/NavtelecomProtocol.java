@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Anton Tananaev (anton@traccar.org)
+ * Copyright 2021 - 2024 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package org.traccar.protocol;
 
-import org.checkerframework.checker.units.qual.N;
 import org.traccar.BaseProtocol;
 import org.traccar.PipelineBuilder;
 import org.traccar.TrackerServer;
@@ -29,8 +28,7 @@ public class NavtelecomProtocol extends BaseProtocol {
     @Inject
     public NavtelecomProtocol(Config config) {
         setSupportedDataCommands(
-            Command.TYPE_ENGINE_STOP,
-            Command.TYPE_ENGINE_RESUME);
+                Command.TYPE_CUSTOM);
         addServer(new TrackerServer(config, getName(), false) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline, Config config) {

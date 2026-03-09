@@ -1,54 +1,40 @@
+/*
+ * Copyright 2024 Anton Tananaev (anton@traccar.org)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.traccar.protocol;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import org.checkerframework.checker.units.qual.C;
 import org.traccar.BaseProtocolEncoder;
 import org.traccar.Protocol;
-import org.traccar.helper.Checksum;
 import org.traccar.model.Command;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 public class NavtelecomProtocolEncoder extends BaseProtocolEncoder {
+
     public NavtelecomProtocolEncoder(Protocol protocol) {
         super(protocol);
     }
 
-    private ByteBuf encodeContent(long deviceId, String content) {
-        ByteBuf header = Unpooled.buffer();
-        long sender = getNavtelecomSender(deviceId);
-        long receiver = getNavtelecomReceiver(deviceId);
-
-        header.writeBytes("@NTC".getBytes(StandardCharsets.US_ASCII));
-        header.writeIntLE((int)sender);
-        header.writeIntLE((int)receiver);
-
-        byte[] content_bytes = content.getBytes(StandardCharsets.US_ASCII);
-
-        header.writeByte(content_bytes.length);
-        header.writeByte(0);
-        header.writeByte(Checksum.xor(ByteBuffer.wrap(content_bytes)));
-
-        header.writeByte(Checksum.xor(header.nioBuffer()));
-
-        ByteBuf response = Unpooled.buffer();
-        response.writeBytes(header);
-        response.writeBytes(content_bytes);
-
-        return response;
-    }
-
     @Override
     protected Object encodeCommand(Command command) {
-        switch (command.getType()) {
-            case Command.TYPE_ENGINE_RESUME:
-                return encodeContent(command.getDeviceId(), "*!1N");
-            case Command.TYPE_ENGINE_STOP:
-                return encodeContent(command.getDeviceId(), "*!1Y");
-            default:
-                return null;
-        }
+        return switch (command.getType()) {
+            case Command.TYPE_CUSTOM -> NavtelecomProtocolDecoder.encodeContent(0, 1, Unpooled.copiedBuffer(
+                    command.getString(Command.KEY_DATA), StandardCharsets.US_ASCII));
+            default -> null;
+        };
     }
+
 }

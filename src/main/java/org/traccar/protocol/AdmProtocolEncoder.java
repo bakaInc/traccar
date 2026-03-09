@@ -29,22 +29,11 @@ public class AdmProtocolEncoder extends StringProtocolEncoder {
     @Override
     protected Object encodeCommand(Command command) {
 
-        switch (command.getType()) {
-            case Command.TYPE_GET_DEVICE_STATUS:
-                return formatCommand(command, "STATUS\r\n");
-
-            case Command.TYPE_CUSTOM:
-                return formatCommand(command, "%s\r\n", Command.KEY_DATA);
-
-            case Command.TYPE_ENGINE_RESUME:
-                return formatCommand(command, "OUTPUT 0,0\r\n");
-
-            case Command.TYPE_ENGINE_STOP:
-                return formatCommand(command, "OUTPUT 1,0\r\n");
-
-            default:
-                return null;
-        }
+        return switch (command.getType()) {
+            case Command.TYPE_GET_DEVICE_STATUS -> formatCommand(command, "STATUS\r\n");
+            case Command.TYPE_CUSTOM -> formatCommand(command, "%s\r\n", Command.KEY_DATA);
+            default -> null;
+        };
     }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 - 2022 Anton Tananaev (anton@traccar.org)
+ * Copyright 2021 - 2024 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import org.traccar.BaseProtocolDecoder;
-import org.traccar.model.Device;
 import org.traccar.session.DeviceSession;
 import org.traccar.NetworkMessage;
 import org.traccar.Protocol;
@@ -108,19 +107,23 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
         return bits;
     }
 
+    static ByteBuf encodeContent(int receiver, int sender, ByteBuf content) {
+        ByteBuf buf = Unpooled.buffer();
+        buf.writeCharSequence("@NTC", StandardCharsets.US_ASCII);
+        buf.writeIntLE(receiver);
+        buf.writeIntLE(sender);
+        buf.writeShortLE(content.readableBytes());
+        buf.writeByte(Checksum.xor(content.nioBuffer()));
+        buf.writeByte(Checksum.xor(buf.nioBuffer()));
+        buf.writeBytes(content);
+        return buf;
+    }
+
     private void sendResponse(
             Channel channel, SocketAddress remoteAddress, int receiver, int sender, ByteBuf content) {
         if (channel != null) {
-            ByteBuf response = Unpooled.buffer();
-            response.writeCharSequence("@NTC", StandardCharsets.US_ASCII);
-            response.writeIntLE(sender);
-            response.writeIntLE(receiver);
-            response.writeShortLE(content.readableBytes());
-            response.writeByte(Checksum.xor(content.nioBuffer()));
-            response.writeByte(Checksum.xor(response.nioBuffer()));
-            response.writeBytes(content);
+            ByteBuf response = encodeContent(sender, receiver, content);
             content.release();
-
             channel.writeAndFlush(new NetworkMessage(response, remoteAddress));
         }
     }
@@ -145,10 +148,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
             if (type.startsWith("*>S")) {
 
                 String sentence = buf.readCharSequence(length, StandardCharsets.US_ASCII).toString();
-                DeviceSession session = getDeviceSession(channel, remoteAddress, sentence.substring(4));
-                Device device = getCacheManager().getObject(Device.class, session.getDeviceId());
-                device.setNavtelecomSenderId(sender);
-                device.setNavtelecomReceiverId(receiver);
+                getDeviceSession(channel, remoteAddress, sentence.substring(4));
 
                 ByteBuf payload = Unpooled.copiedBuffer("*<S", StandardCharsets.US_ASCII);
 
@@ -177,6 +177,18 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
 
                 sendResponse(channel, remoteAddress, receiver, sender, payload);
 
+            } else if (type.startsWith("*@C")) {
+
+                DeviceSession deviceSession = getDeviceSession(channel, remoteAddress);
+                if (deviceSession == null) {
+                    return null;
+                }
+
+                Position position = new Position(getProtocolName());
+                position.setDeviceId(deviceSession.getDeviceId());
+                position.set(Position.KEY_RESULT, buf.readCharSequence(length, StandardCharsets.US_ASCII).toString());
+                return position;
+
             }
 
         } else {
@@ -197,12 +209,12 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                     Position position = new Position(getProtocolName());
                     position.setDeviceId(deviceSession.getDeviceId());
 
-                    for (int j = 0; j < bits.length(); j++) {
-                        if (bits.get(j)) {
+                    for (int j = 1; j <= bits.length(); j++) {
+                        if (bits.get(j - 1)) {
 
                             int value;
 
-                            switch (j + 1) {
+                            switch (j) {
                                 case 1:
                                     position.set(Position.KEY_INDEX, buf.readUnsignedIntLE());
                                     break;
@@ -214,13 +226,10 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                     break;
                                 case 4:
                                     value = buf.readUnsignedByte();
-                                    position.set(
-                                            Position.KEY_ALARM,
-                                            BitUtil.check(value, 2) ? Position.ALARM_GENERAL : null);
+                                    position.addAlarm(BitUtil.check(value, 2) ? Position.ALARM_GENERAL : null);
                                     int guardMode = BitUtil.between(value, 3, 4);
                                     position.set(Position.KEY_ARMED, (0 < guardMode) && (guardMode < 3));
                                     break;
-
                                 case 5:
                                     value = buf.readUnsignedByte();
                                     position.set(Position.KEY_ROAMING, BitUtil.check(value, 6) ? true : null);
@@ -249,7 +258,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                     position.setCourse(buf.readUnsignedShortLE());
                                     break;
                                 case 15:
-                                    position.set(Position.KEY_ODOMETER, buf.readFloatLE());
+                                    position.set(Position.KEY_ODOMETER, buf.readFloatLE() * 1000);
                                     break;
                                 case 19:
                                     position.set(Position.KEY_POWER, buf.readShortLE() * 0.001);
@@ -263,7 +272,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 24:
                                 case 25:
                                 case 26:
-                                    position.set(Position.PREFIX_ADC + (j + 2 - 21), buf.readUnsignedShortLE() * 0.001);
+                                    position.set(Position.PREFIX_ADC + (j + 1 - 21), buf.readUnsignedShortLE() * 0.001);
                                     break;
                                 case 29:
                                     value = buf.readUnsignedByte();
@@ -279,11 +288,11 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                     break;
                                 case 33:
                                 case 34:
-                                    position.set(Position.PREFIX_COUNT + (j + 2 - 33), buf.readUnsignedIntLE());
+                                    position.set(Position.PREFIX_COUNT + (j + 1 - 33), buf.readUnsignedIntLE());
                                     break;
                                 case 35:
                                 case 36:
-                                    position.set("freq" + (j + 2 - 35), buf.readUnsignedShortLE());
+                                    position.set("freq" + (j + 1 - 35), buf.readUnsignedShortLE());
                                     break;
                                 case 37:
                                     position.set(Position.KEY_HOURS, buf.readUnsignedIntLE() * 1000);
@@ -296,11 +305,11 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 43:
                                     value = buf.readUnsignedShortLE();
                                     position.set(
-                                            Position.KEY_FUEL_LEVEL + (j + 2 - 38), (value < 65500) ? value : null);
+                                            Position.KEY_FUEL + (j + 1 - 38), (value < 65500) ? value : null);
                                     break;
                                 case 44:
                                     value = buf.readUnsignedShortLE();
-                                    position.set(Position.KEY_FUEL_LEVEL, (value < 65500) ? value : null);
+                                    position.set(Position.KEY_FUEL, (value < 65500) ? value : null);
                                     break;
                                 case 45:
                                 case 46:
@@ -312,20 +321,21 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 52:
                                     value = buf.readByte();
                                     position.set(
-                                            Position.PREFIX_TEMP + (j + 2 - 45), (value != (byte) 0x80) ? value : null);
+                                            Position.PREFIX_TEMP + (j + 1 - 45), (value != (byte) 0x80) ? value : null);
                                     break;
                                 case 53:
                                     value = buf.readUnsignedShortLE();
                                     if (value != 0x7FFF) {
-                                        if (BitUtil.check(value, 7)) {
-                                            position.set("obdFuelLevel", BitUtil.to(value, 6));
+                                        if (BitUtil.check(value, 15)) {
+                                            position.set("obdFuelLevel", BitUtil.to(value, 14));
                                         } else {
-                                            position.set("obdFuel", BitUtil.to(value, 6) / 10);
+                                            position.set("obdFuel", BitUtil.to(value, 14) * 0.1);
                                         }
                                     }
                                     break;
                                 case 54:
-                                    position.set(Position.KEY_FUEL_USED, buf.readFloatLE());
+                                    double fuelUsed = buf.readFloatLE() * 0.5;
+                                    position.set(Position.KEY_FUEL_USED, (fuelUsed >= 0) ? fuelUsed : null);
                                     break;
                                 case 55:
                                     value = buf.readUnsignedShortLE();
@@ -336,7 +346,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                     position.set(Position.KEY_COOLANT_TEMP, (value != (byte) 0x80) ? value : null);
                                     break;
                                 case 57:
-                                    position.set(Position.KEY_OBD_ODOMETER, buf.readFloatLE());
+                                    position.set(Position.KEY_OBD_ODOMETER, buf.readFloatLE() * 1000);
                                     break;
                                 case 58:
                                 case 59:
@@ -344,7 +354,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 61:
                                 case 62:
                                     value = buf.readUnsignedShortLE();
-                                    position.set("axleWeight" + (j + 2 - 58), (value != 0xFFFF) ? value : null);
+                                    position.set("axleWeight" + (j + 1 - 58), (value != 0xFFFF) ? value : null);
                                     break;
                                 case 63:
                                     value = buf.readUnsignedByte();
@@ -361,10 +371,10 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 66:
                                     value = buf.readUnsignedShortLE();
                                     if (value != 0x7FFF) {
-                                        if (BitUtil.check(value, 7)) {
-                                            position.set("obdAdBlueLevel", BitUtil.to(value, 6));
+                                        if (BitUtil.check(value, 15)) {
+                                            position.set("obdAdBlueLevel", BitUtil.to(value, 14));
                                         } else {
-                                            position.set("obdAdBlue", BitUtil.to(value, 6) / 10);
+                                            position.set("obdAdBlue", BitUtil.to(value, 14) * 0.1);
                                         }
                                     }
                                     break;
@@ -379,9 +389,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                     break;
                                 case 69:
                                     value = buf.readUnsignedByte();
-                                    position.set(
-                                            Position.KEY_OBD_SPEED,
-                                            (value != 0xFF) ? UnitsConverter.knotsFromKph(value) : null);
+                                    position.set(Position.KEY_OBD_SPEED, (value != 0xFF) ? value : null);
                                     break;
                                 case 78:
                                 case 79:
@@ -389,7 +397,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 81:
                                 case 82:
                                 case 83:
-                                    position.set("fuelTemp" + (j + 2 - 78), (int) buf.readByte());
+                                    position.set("fuelTemp" + (j + 1 - 78), (int) buf.readByte());
                                     break;
                                 case 163:
                                 case 164:
@@ -397,7 +405,7 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 166:
                                     value = buf.readShortLE();
                                     position.set(
-                                            Position.PREFIX_TEMP + (j + 2 + 8 - 163),
+                                            Position.PREFIX_TEMP + (j + 1 + 8 - 163),
                                             (value != (short) 0x8000) ? value * 0.05 : null);
                                     break;
                                 case 167:
@@ -405,22 +413,22 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
                                 case 169:
                                 case 170:
                                     value = buf.readUnsignedByte();
-                                    position.set("humidity" + (j + 2 - 167), (value != 0xFF) ? value * 0.5 : null);
+                                    position.set("humidity" + (j + 1 - 167), (value != 0xFF) ? value * 0.5 : null);
                                     break;
                                 case 206:
                                     position.set("diagnostic", buf.readUnsignedIntLE());
                                     break;
                                 default:
                                     if ((207 <= j) && (j <= 222)) {
-                                        position.set("user1Byte" + (j + 2 - 207), buf.readUnsignedByte());
+                                        position.set("user1Byte" + (j + 1 - 207), buf.readUnsignedByte());
                                     } else if ((223 <= j) && (j <= 237)) {
-                                        position.set("user2Byte" + (j + 2 - 223), buf.readUnsignedShortLE());
+                                        position.set("user2Byte" + (j + 1 - 223), buf.readUnsignedShortLE());
                                     } else if ((238 <= j) && (j <= 252)) {
-                                        position.set("user4Byte" + (j + 2 - 238), buf.readUnsignedIntLE());
+                                        position.set("user4Byte" + (j + 1 - 238), buf.readUnsignedIntLE());
                                     } else if ((253 <= j) && (j <= 255)) {
-                                        position.set("user8Byte" + (j + 2 - 253), buf.readLongLE());
+                                        position.set("user8Byte" + (j + 1 - 253), buf.readLongLE());
                                     } else {
-                                        buf.skipBytes(getItemLength(j + 1));
+                                        buf.skipBytes(getItemLength(j));
                                     }
                                     break;
                             }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Anton Tananaev (anton@traccar.org)
+ * Copyright 2022 - 2026 Anton Tananaev (anton@traccar.org)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,12 @@
  */
 package org.traccar.api.security;
 
+import com.warrenstrange.googleauth.GoogleAuthenticator;
 import org.traccar.api.signature.TokenManager;
 import org.traccar.config.Config;
 import org.traccar.config.Keys;
 import org.traccar.database.LdapProvider;
+import org.traccar.helper.DataConverter;
 import org.traccar.helper.model.UserUtil;
 import org.traccar.model.User;
 import org.traccar.storage.Storage;
@@ -31,7 +33,9 @@ import jakarta.annotation.Nullable;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.util.Objects;
 
 @Singleton
 public class LoginService {
@@ -57,56 +61,70 @@ public class LoginService {
         forceOpenId = config.getBoolean(Keys.OPENID_FORCE);
     }
 
-    public User login(String token) throws StorageException, GeneralSecurityException, IOException {
-        if (serviceAccountToken != null && serviceAccountToken.equals(token)) {
-            return new ServiceAccountUser();
+    public LoginResult login(
+            String scheme, String credentials) throws StorageException, GeneralSecurityException, IOException {
+        switch (scheme.toLowerCase()) {
+            case "bearer":
+                return login(credentials);
+            case "basic":
+                byte[] decodedBytes = DataConverter.parseBase64(credentials);
+                String[] auth = new String(decodedBytes, StandardCharsets.US_ASCII).split(":", 2);
+                return login(auth[0], auth[1], null);
+            default:
+                throw new SecurityException("Unsupported authorization scheme");
         }
-        long userId = tokenManager.verifyToken(token);
+    }
+
+    public LoginResult login(String token) throws StorageException, GeneralSecurityException, IOException {
+        if (serviceAccountToken != null && serviceAccountToken.equals(token)) {
+            return new LoginResult(new ServiceAccountUser());
+        }
+        TokenManager.TokenData tokenData = tokenManager.verifyToken(token);
         User user = storage.getObject(User.class, new Request(
-                new Columns.All(), new Condition.Equals("id", userId)));
+                new Columns.All(), new Condition.Equals("id", tokenData.getUserId())));
         if (user != null) {
             checkUserEnabled(user);
         }
-        return user;
+        return new LoginResult(user, tokenData.getExpiration());
     }
 
-    public User login(String email, String password) throws StorageException {
+    public LoginResult login(String email, String password, Integer code) throws StorageException {
         if (forceOpenId) {
             return null;
         }
 
-        email = email.trim();
+        email = email.trim().toLowerCase();
         User user = storage.getObject(User.class, new Request(
                 new Columns.All(),
                 new Condition.Or(
-                        new Condition.Equals("email", email),
-                        new Condition.Equals("login", email))));
+                        new Condition.Equals("LOWER(email)", email),
+                        new Condition.Equals("LOWER(login)", email))));
         if (user != null) {
             if (ldapProvider != null && user.getLogin() != null && ldapProvider.login(user.getLogin(), password)
                     || !forceLdap && user.isPasswordValid(password)) {
+                checkUserCode(user, code);
                 checkUserEnabled(user);
-                return user;
+                return new LoginResult(user);
             }
         } else {
             if (ldapProvider != null && ldapProvider.login(email, password)) {
                 user = ldapProvider.getUser(email);
                 user.setId(storage.addObject(user, new Request(new Columns.Exclude("id"))));
                 checkUserEnabled(user);
-                return user;
+                return new LoginResult(user);
             }
         }
         return null;
     }
 
-    public User login(String email, String name, Boolean administrator) throws StorageException {
-        User user = storage.getObject(User.class, new Request(
-            new Columns.All(),
-            new Condition.Equals("email", email)));
+    public LoginResult login(String email, String name, boolean administrator) throws StorageException {
 
-        if (user != null) {
-            checkUserEnabled(user);
-            return user;
-        } else {
+        User user = storage.getObject(User.class, new Request(
+                new Columns.All(),
+                new Condition.Equals("LOWER(email)", email.toLowerCase())));
+
+        if (user == null) {
+
             user = new User();
             UserUtil.setUserDefaults(user, config);
             user.setName(name);
@@ -114,16 +132,38 @@ public class LoginService {
             user.setFixedEmail(true);
             user.setAdministrator(administrator);
             user.setId(storage.addObject(user, new Request(new Columns.Exclude("id"))));
-            checkUserEnabled(user);
-            return user;
-        }
-    }
 
+        } else if (!Objects.equals(name, user.getName()) || user.getAdministrator() != administrator) {
+
+            user.setName(name);
+            user.setAdministrator(administrator);
+
+            storage.updateObject(user, new Request(
+                    new Columns.Include("name", "administrator"),
+                    new Condition.Equals("id", user.getId())));
+        }
+
+        checkUserEnabled(user);
+        return new LoginResult(user);
+    }
     private void checkUserEnabled(User user) throws SecurityException {
         if (user == null) {
             throw new SecurityException("Unknown account");
         }
         user.checkDisabled();
+    }
+
+    private void checkUserCode(User user, Integer code) throws SecurityException {
+        String key = user.getTotpKey();
+        if (key != null && !key.isEmpty()) {
+            if (code == null) {
+                throw new CodeRequiredException();
+            }
+            GoogleAuthenticator authenticator = new GoogleAuthenticator();
+            if (!authenticator.authorize(key, code)) {
+                throw new SecurityException("User authorization failed");
+            }
+        }
     }
 
 }
