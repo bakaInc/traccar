@@ -15,6 +15,7 @@
  */
 package org.traccar.api.resource;
 
+import java.util.Collection;
 import org.traccar.api.BaseResource;
 import org.traccar.helper.model.PositionUtil;
 import org.traccar.model.Device;
@@ -42,6 +43,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
+
 import javax.xml.stream.XMLStreamException;
 import java.util.ArrayList;
 import java.util.Date;
@@ -94,6 +96,41 @@ public class PositionResource extends BaseResource {
         } else {
             return PositionUtil.getLatestPositions(storage, getUserId()).stream();
         }
+    }
+
+    @Path("id-list")
+    @GET
+    public Collection<Position> getList(
+            @QueryParam("deviceId") List<Long> deviceIds)
+            throws StorageException {
+        List<Position> result = new LinkedList<>();
+        for (Long deviceId : deviceIds) {
+            result.addAll(storage.getObjects(Position.class, new Request(
+                    new Columns.All(), new Condition.LatestPositions(deviceId))));
+        }
+
+        return result;
+    }
+
+    @Path("imei-list")
+    @GET
+    public Collection<Position> getImeiList(
+            @QueryParam("uniqueId") List<String> uniqueIds)
+            throws StorageException {
+        List<Device> devices = new LinkedList<>();
+        for (String uniqueId : uniqueIds) {
+            devices.addAll(storage.getObjects(Device.class, new Request(
+                    new Columns.All(), new Condition.Equals("uniqueId", uniqueId))));
+        }
+
+        List<Position> result = new LinkedList<>();
+        for (Device device : devices) {
+            long deviceId = device.getId();
+            result.addAll(storage.getObjects(Position.class, new Request(
+                    new Columns.All(), new Condition.LatestPositions(deviceId))));
+        }
+
+        return result;
     }
 
     @Path("{id}")
