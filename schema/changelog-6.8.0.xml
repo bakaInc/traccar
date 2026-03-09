@@ -28,7 +28,8 @@
         'fixtime',
         partitioning_column => 'deviceid',
         number_partitions => 8,
-        migrate_data => TRUE
+        migrate_data => TRUE,
+        if_not_exists => TRUE
       );
 
       SELECT create_hypertable(
@@ -36,7 +37,8 @@
         'eventtime',
         partitioning_column => 'deviceid',
         number_partitions => 8,
-        migrate_data => TRUE
+        migrate_data => TRUE,
+        if_not_exists => TRUE
       );
 
       CREATE INDEX IF NOT EXISTS tc_positions_id_idx ON tc_positions(id);
