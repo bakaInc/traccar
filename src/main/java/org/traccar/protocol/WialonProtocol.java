@@ -37,7 +37,9 @@ public class WialonProtocol extends BaseProtocol {
                 Command.TYPE_REBOOT_DEVICE,
                 Command.TYPE_SEND_USSD,
                 Command.TYPE_IDENTIFICATION,
-                Command.TYPE_OUTPUT_CONTROL);
+                Command.TYPE_OUTPUT_CONTROL,
+                Command.TYPE_ENGINE_RESUME,
+                Command.TYPE_ENGINE_STOP);
         addServer(new TrackerServer(config, getName(), false) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline, Config config) {

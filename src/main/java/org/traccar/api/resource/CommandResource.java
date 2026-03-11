@@ -17,8 +17,12 @@
  */
 package org.traccar.api.resource;
 
+import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.traccar.BaseProtocol;
@@ -29,28 +33,12 @@ import org.traccar.command.CommandSenderManager;
 import org.traccar.database.CommandsManager;
 import org.traccar.helper.LogAction;
 import org.traccar.helper.model.DeviceUtil;
-import org.traccar.model.Command;
-import org.traccar.model.Device;
-import org.traccar.model.Group;
-import org.traccar.model.Position;
-import org.traccar.model.QueuedCommand;
-import org.traccar.model.Typed;
-import org.traccar.model.User;
-import org.traccar.model.UserRestrictions;
+import org.traccar.model.*;
 import org.traccar.storage.StorageException;
 import org.traccar.storage.query.Columns;
 import org.traccar.storage.query.Condition;
 import org.traccar.storage.query.Request;
 
-import jakarta.inject.Inject;
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -197,6 +185,12 @@ public class CommandResource extends ExtendedObjectResource<Command> {
             }
             return result;
         }
+    }
+
+    @GET
+    @Path("executed")
+    public boolean isCommandExecuted(@QueryParam("commandId") Long commandId) throws StorageException {
+        return storage.getObjects(QueuedCommand.class, new Request(new Columns.All(), new Condition.Equals("id", commandId))).isEmpty();
     }
 
 }

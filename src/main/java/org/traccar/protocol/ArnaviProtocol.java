@@ -15,21 +15,25 @@
  */
 package org.traccar.protocol;
 
+import jakarta.inject.Inject;
 import org.traccar.BaseProtocol;
 import org.traccar.PipelineBuilder;
 import org.traccar.TrackerServer;
 import org.traccar.config.Config;
-
-import jakarta.inject.Inject;
+import org.traccar.model.Command;
 
 public class ArnaviProtocol extends BaseProtocol {
 
     @Inject
     public ArnaviProtocol(Config config) {
+        setSupportedDataCommands(
+                Command.TYPE_ENGINE_STOP,
+                Command.TYPE_ENGINE_RESUME);
         addServer(new TrackerServer(config, getName(), false) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline, Config config) {
                 pipeline.addLast(new ArnaviFrameDecoder());
+                pipeline.addLast(new ArnaviBinaryProtocolEncoder(ArnaviProtocol.this));
                 pipeline.addLast(new ArnaviProtocolDecoder(ArnaviProtocol.this));
             }
         });

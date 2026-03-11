@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 package org.traccar.protocol;
-
+import org.traccar.model.Device;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -136,6 +136,7 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
             DeviceSession deviceSession = getDeviceSession(channel, remoteAddress, imei);
 
             if (deviceSession != null) {
+                getCacheManager().getObject(Device.class, deviceSession.getDeviceId()).setArnaviParcelNumber(0);
                 sendResponse(channel, version, 0);
             }
 
@@ -150,6 +151,8 @@ public class ArnaviBinaryProtocolDecoder extends BaseProtocolDecoder {
         List<Position> positions = new LinkedList<>();
 
         int index = buf.readUnsignedByte();
+
+        getCacheManager().getObject(Device.class, deviceSession.getDeviceId()).setArnaviParcelNumber(index);
 
         byte recordType = buf.readByte();
         while (buf.readableBytes() > 0) {

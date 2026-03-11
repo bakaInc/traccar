@@ -21,22 +21,29 @@ import org.traccar.TrackerServer;
 import org.traccar.config.Config;
 
 import jakarta.inject.Inject;
+import org.traccar.model.Command;
 
 public class GoSafeProtocol extends BaseProtocol {
 
     @Inject
     public GoSafeProtocol(Config config) {
+        setSupportedDataCommands(
+                Command.TYPE_ENGINE_STOP,
+                Command.TYPE_ENGINE_RESUME);
+
         addServer(new TrackerServer(config, getName(), false) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline, Config config) {
                 pipeline.addLast(new GoSafeFrameDecoder());
                 pipeline.addLast(new GoSafeProtocolDecoder(GoSafeProtocol.this));
+                pipeline.addLast(new GoSafeProtocolEncoder(GoSafeProtocol.this));
             }
         });
         addServer(new TrackerServer(config, getName(), true) {
             @Override
             protected void addProtocolHandlers(PipelineBuilder pipeline, Config config) {
                 pipeline.addLast(new GoSafeProtocolDecoder(GoSafeProtocol.this));
+                pipeline.addLast(new GoSafeProtocolEncoder(GoSafeProtocol.this));
             }
         });
     }

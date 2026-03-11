@@ -19,6 +19,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import jakarta.inject.Inject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.traccar.helper.NetworkUtil;
@@ -26,8 +27,6 @@ import org.traccar.helper.model.AttributeUtil;
 import org.traccar.model.Command;
 import org.traccar.model.Device;
 import org.traccar.session.cache.CacheManager;
-
-import jakarta.inject.Inject;
 
 public abstract class BaseProtocolEncoder extends ChannelOutboundHandlerAdapter {
 
@@ -78,6 +77,15 @@ public abstract class BaseProtocolEncoder extends ChannelOutboundHandlerAdapter 
         String model = getCacheManager().getObject(Device.class, deviceId).getModel();
         return modelOverride != null ? modelOverride : model;
     }
+
+    protected long getNavtelecomSender(long deviceId) {
+        return cacheManager.getObject(Device.class, deviceId).getNavtelecomSenderId();
+    }
+
+    protected long getNavtelecomReceiver(long deviceId) {
+        return cacheManager.getObject(Device.class, deviceId).getNavtelecomReceiverId();
+    }
+
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {

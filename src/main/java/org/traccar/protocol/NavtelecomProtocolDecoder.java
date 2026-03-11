@@ -19,6 +19,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import org.traccar.BaseProtocolDecoder;
+import org.traccar.model.Device;
 import org.traccar.session.DeviceSession;
 import org.traccar.NetworkMessage;
 import org.traccar.Protocol;
@@ -148,6 +149,11 @@ public class NavtelecomProtocolDecoder extends BaseProtocolDecoder {
             if (type.startsWith("*>S")) {
 
                 String sentence = buf.readCharSequence(length, StandardCharsets.US_ASCII).toString();
+                DeviceSession session = getDeviceSession(channel, remoteAddress, sentence.substring(4));
+                Device device = getCacheManager().getObject(Device.class, session.getDeviceId());
+                device.setNavtelecomSenderId(sender);
+                device.setNavtelecomReceiverId(receiver);
+
                 getDeviceSession(channel, remoteAddress, sentence.substring(4));
 
                 ByteBuf payload = Unpooled.copiedBuffer("*<S", StandardCharsets.US_ASCII);
