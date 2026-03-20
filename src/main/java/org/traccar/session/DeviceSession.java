@@ -66,7 +66,8 @@ public class DeviceSession {
     }
 
     public boolean supportsLiveCommands() {
-        return BasePipelineFactory.getHandler(channel.pipeline(), HttpRequestDecoder.class) == null;
+        return channel.isActive()
+                && BasePipelineFactory.getHandler(channel.pipeline(), HttpRequestDecoder.class) == null;
     }
 
     public void sendCommand(Command command) {

@@ -137,18 +137,4 @@ public class DeviceLookupService {
         }
         return device;
     }
-
-    public Device lookupOptional(String[] optionalIds) {
-        Device device = null;
-        try {
-            for (String optionalId : optionalIds) {
-                device = storage.getObject(Device.class, new Request(
-                        new Columns.All(), new Condition.Equals("optionalId", optionalId)));
-            }
-        } catch (StorageException e) {
-            LOGGER.warn("Find device error", e);
-        }
-        return device;
-    }
-
 }

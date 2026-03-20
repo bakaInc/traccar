@@ -54,6 +54,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -74,6 +75,7 @@ public class CacheManager implements BroadcastInterface {
     private volatile Server server;
     private final Map<Long, ConcurrentLinkedDeque<Position>> devicePositions = new ConcurrentHashMap<>();
     private final Map<Long, HashSet<Object>> deviceReferences = new ConcurrentHashMap<>();
+    private final Map<Long, ReentrantLock> loadingLocks = new ConcurrentHashMap<>();
 
     @Inject
     public CacheManager(Config config, Storage storage, BroadcastService broadcastService) throws StorageException {
@@ -131,34 +133,65 @@ public class CacheManager implements BroadcastInterface {
                 .collect(Collectors.toUnmodifiableSet());
     }
 
-    public synchronized void addDevice(long deviceId, Object key) throws Exception {
-        var references = deviceReferences.computeIfAbsent(deviceId, k -> new HashSet<>());
-        if (references.isEmpty()) {
+    public void addDevice(long deviceId, Object key) throws Exception {
+        synchronized (this) {
+            var references = deviceReferences.computeIfAbsent(deviceId, k -> new HashSet<>());
+            if (!references.isEmpty()) {
+                references.add(key);
+                LOGGER.debug("Cache add device {} references {} key {}", deviceId, references.size(), key);
+                return;
+            }
+        }
+
+        ReentrantLock loadLock = loadingLocks.computeIfAbsent(deviceId, k -> new ReentrantLock());
+        loadLock.lock();
+        try {
+            synchronized (this) {
+                var references = deviceReferences.computeIfAbsent(deviceId, k -> new HashSet<>());
+                if (!references.isEmpty()) {
+                    references.add(key);
+                    LOGGER.debug("Cache add device {} references {} key {}", deviceId, references.size(), key);
+                    return;
+                }
+            }
+
+            // All DB work happens here — outside the global lock
             Device device = storage.getObject(Device.class, new Request(
                     new Columns.All(), new Condition.Equals("id", deviceId)));
-            graph.addObject(device);
-            initializeCache(device);
-            if (device.getPositionId() > 0) {
-                Position position = storage.getObject(Position.class, new Request(
-                        new Columns.All(), new Condition.Equals("id", device.getPositionId())));
-                if (position != null) {
-                    var positions = devicePositions.computeIfAbsent(deviceId, k -> new ConcurrentLinkedDeque<>());
-                    if (config.getBoolean(Keys.REPORT_TRIP_NEW_LOGIC)) {
-                        long minDuration = AttributeUtil.lookup(this, Keys.REPORT_TRIP_MIN_DURATION, deviceId) * 1000;
-                        var from = new Date(position.getFixTime().getTime() - minDuration);
-                        var to = position.getFixTime();
-                        try (var positionsStream =
-                                PositionUtil.getPositionsStreamWithExtra(storage, deviceId, from, to)) {
-                            positionsStream.forEach(positions::add);
+            if (device != null) {
+                graph.addObject(device);
+                initializeCache(device);
+                if (device.getPositionId() > 0) {
+                    Position position = storage.getObject(Position.class, new Request(
+                            new Columns.All(), new Condition.Equals("id", device.getPositionId())));
+                    if (position != null) {
+                        var positions = devicePositions.computeIfAbsent(deviceId, k -> new ConcurrentLinkedDeque<>());
+                        if (config.getBoolean(Keys.REPORT_TRIP_NEW_LOGIC)) {
+                            long minDuration = AttributeUtil.lookup(
+                                    this, Keys.REPORT_TRIP_MIN_DURATION, deviceId) * 1000;
+                            var from = new Date(position.getFixTime().getTime() - minDuration);
+                            var to = position.getFixTime();
+                            try (var positionsStream =
+                                    PositionUtil.getPositionsStreamWithExtra(storage, deviceId, from, to)) {
+                                positionsStream.forEach(positions::add);
+                            }
+                        } else {
+                            positions.add(position);
                         }
-                    } else {
-                        positions.add(position);
                     }
                 }
             }
+
+            // Register reference under brief global lock — no I/O
+            synchronized (this) {
+                var references = deviceReferences.computeIfAbsent(deviceId, k -> new HashSet<>());
+                references.add(key);
+                LOGGER.debug("Cache add device {} references {} key {}", deviceId, references.size(), key);
+            }
+        } finally {
+            loadLock.unlock();
+            loadingLocks.remove(deviceId);
         }
-        references.add(key);
-        LOGGER.debug("Cache add device {} references {} key {}", deviceId, references.size(), key);
     }
 
     public synchronized void removeDevice(long deviceId, Object key) {
