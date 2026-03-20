@@ -75,6 +75,7 @@ public class Command extends BaseCommand {
     public static final String KEY_LANGUAGE = "language";
     public static final String KEY_TIMEZONE = "timezone";
     public static final String KEY_DEVICE_PASSWORD = "devicePassword";
+    public static final String KEY_TK103_ID = "tk103id";
     public static final String KEY_RADIUS = "radius";
     public static final String KEY_MESSAGE = "message";
     public static final String KEY_ENABLE = "enable";

@@ -18,6 +18,8 @@ package org.traccar.database;
 import io.netty.util.Timeout;
 import io.netty.util.Timer;
 import io.netty.util.TimerTask;
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.traccar.config.Config;
@@ -29,8 +31,6 @@ import org.traccar.storage.query.Columns;
 import org.traccar.storage.query.Condition;
 import org.traccar.storage.query.Request;
 
-import jakarta.inject.Inject;
-import jakarta.inject.Singleton;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -131,6 +131,19 @@ public class DeviceLookupService {
                 } else {
                     LOGGER.debug("Device lookup throttled {}", uniqueId);
                 }
+            }
+        } catch (StorageException e) {
+            LOGGER.warn("Find device error", e);
+        }
+        return device;
+    }
+
+    public Device lookupOptional(String[] optionalIds) {
+        Device device = null;
+        try {
+            for (String optionalId : optionalIds) {
+                device = storage.getObject(Device.class, new Request(
+                        new Columns.All(), new Condition.Equals("optionalId", optionalId)));
             }
         } catch (StorageException e) {
             LOGGER.warn("Find device error", e);

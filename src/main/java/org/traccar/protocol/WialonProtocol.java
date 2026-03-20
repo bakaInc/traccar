@@ -38,6 +38,7 @@ public class WialonProtocol extends BaseProtocol {
                 Command.TYPE_SEND_USSD,
                 Command.TYPE_IDENTIFICATION,
                 Command.TYPE_OUTPUT_CONTROL,
+                Command.TYPE_CUSTOM,
                 Command.TYPE_ENGINE_RESUME,
                 Command.TYPE_ENGINE_STOP);
         addServer(new TrackerServer(config, getName(), false) {

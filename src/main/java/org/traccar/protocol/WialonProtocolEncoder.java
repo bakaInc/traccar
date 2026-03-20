@@ -34,8 +34,9 @@ public class WialonProtocolEncoder extends StringProtocolEncoder {
             case Command.TYPE_IDENTIFICATION -> formatCommand(command, "VER?\r\n");
             case Command.TYPE_OUTPUT_CONTROL ->
                     formatCommand(command, "L%s=%s\r\n", Command.KEY_INDEX, Command.KEY_DATA);
-            case Command.TYPE_ENGINE_STOP -> formatCommand(command, "OUTPUT0=1\r\n");
-            case Command.TYPE_ENGINE_RESUME -> formatCommand(command, "OUTPUT0=0\r\n");
+            case Command.TYPE_CUSTOM -> formatCommand(command, "%s\r\n", Command.KEY_DATA);
+            case Command.TYPE_ENGINE_STOP -> formatCommand(command, "OUTPUT0 1\r\n");
+            case Command.TYPE_ENGINE_RESUME -> formatCommand(command, "OUTPUT0 0\r\n");
             default -> null;
         };
     }
