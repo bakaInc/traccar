@@ -54,6 +54,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -76,12 +77,16 @@ public class CacheManager implements BroadcastInterface {
     private final Map<Long, ConcurrentLinkedDeque<Position>> devicePositions = new ConcurrentHashMap<>();
     private final Map<Long, HashSet<Object>> deviceReferences = new ConcurrentHashMap<>();
     private final Map<Long, ReentrantLock> loadingLocks = new ConcurrentHashMap<>();
+    private final Semaphore loadingSemaphore;
 
     @Inject
     public CacheManager(Config config, Storage storage, BroadcastService broadcastService) throws StorageException {
         this.config = config;
         this.storage = storage;
         this.broadcastService = broadcastService;
+        int maxPoolSize = config.getInteger(Keys.DATABASE_MAX_POOL_SIZE);
+        int concurrentLoads = maxPoolSize > 0 ? Math.max(1, maxPoolSize / 2) : 5;
+        this.loadingSemaphore = new Semaphore(concurrentLoads);
         server = storage.getObject(Server.class, new Request(new Columns.All()));
         broadcastService.registerListener(this);
     }
@@ -155,31 +160,37 @@ public class CacheManager implements BroadcastInterface {
                 }
             }
 
-            // All DB work happens here — outside the global lock
-            Device device = storage.getObject(Device.class, new Request(
-                    new Columns.All(), new Condition.Equals("id", deviceId)));
-            if (device != null) {
-                graph.addObject(device);
-                initializeCache(device);
-                if (device.getPositionId() > 0) {
-                    Position position = storage.getObject(Position.class, new Request(
-                            new Columns.All(), new Condition.Equals("id", device.getPositionId())));
-                    if (position != null) {
-                        var positions = devicePositions.computeIfAbsent(deviceId, k -> new ConcurrentLinkedDeque<>());
-                        if (config.getBoolean(Keys.REPORT_TRIP_NEW_LOGIC)) {
-                            long minDuration = AttributeUtil.lookup(
-                                    this, Keys.REPORT_TRIP_MIN_DURATION, deviceId) * 1000;
-                            var from = new Date(position.getFixTime().getTime() - minDuration);
-                            var to = position.getFixTime();
-                            try (var positionsStream =
-                                    PositionUtil.getPositionsStreamWithExtra(storage, deviceId, from, to)) {
-                                positionsStream.forEach(positions::add);
+            // All DB work happens here — outside the global lock.
+            // Semaphore limits concurrent loads to reserve connections for other queries (e.g. DeviceLookupService).
+            loadingSemaphore.acquire();
+            try {
+                Device device = storage.getObject(Device.class, new Request(
+                        new Columns.All(), new Condition.Equals("id", deviceId)));
+                if (device != null) {
+                    graph.addObject(device);
+                    initializeCache(device);
+                    if (device.getPositionId() > 0) {
+                        Position position = storage.getObject(Position.class, new Request(
+                                new Columns.All(), new Condition.Equals("id", device.getPositionId())));
+                        if (position != null) {
+                            var positions = devicePositions.computeIfAbsent(deviceId, k -> new ConcurrentLinkedDeque<>());
+                            if (config.getBoolean(Keys.REPORT_TRIP_NEW_LOGIC)) {
+                                long minDuration = AttributeUtil.lookup(
+                                        this, Keys.REPORT_TRIP_MIN_DURATION, deviceId) * 1000;
+                                var from = new Date(position.getFixTime().getTime() - minDuration);
+                                var to = position.getFixTime();
+                                try (var positionsStream =
+                                        PositionUtil.getPositionsStreamWithExtra(storage, deviceId, from, to)) {
+                                    positionsStream.forEach(positions::add);
+                                }
+                            } else {
+                                positions.add(position);
                             }
-                        } else {
-                            positions.add(position);
                         }
                     }
                 }
+            } finally {
+                loadingSemaphore.release();
             }
 
             // Register reference under brief global lock — no I/O
